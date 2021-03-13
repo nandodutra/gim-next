@@ -1,7 +1,10 @@
 const { Sequelize, connection } = require('../../config/database')
+const { Op } = require('sequelize')
 const People = require('../../models/people')
 const Oferta = require('../../models/oferta')
 const OfertaCompleta = require('../../models/ofertaCompleta')
+const Cota = require('../../models/cota')
+const CotaItem = require('../../models/cotaItem')
 
 const getProcedimentos = async function(table, ofertaId) {
   const oferta = await Oferta.findByPk(ofertaId, {
@@ -122,7 +125,10 @@ const getDataAtendimento = async (req, res) => {
                 AND scadestabelecimento.tipestabelecimento <> 'P' 
                 AND (${procedimento})  
                 AND oferta_id = '${oferta.id}' 
-                AND urgencia IS NULL`)
+                AND urgencia IS NULL`, { 
+                  type: Sequelize.QueryTypes.SELECT,
+                  raw: true 
+                })
           } else {
             contagemMarcacoes = await connection.query(`
               SELECT 
@@ -137,8 +143,48 @@ const getDataAtendimento = async (req, res) => {
               AND scadestabelecimento.tipestabelecimento = 'P' 
               AND (${procedimento}) 
               AND oferta_id = '${oferta.id}' 
-              AND urgencia IS NULL`)
+              AND urgencia IS NULL`, { 
+                type: Sequelize.QueryTypes.SELECT,
+                raw: true 
+              })
           }
+
+          const competencia = await Cota.findOne({
+            where: {
+              dataInicio: { [Op.lte]: currentDate },
+              dataFim: { [Op.gte]: currentDate }
+            }
+          })
+
+          const psfId = user.estabelecimento_id
+
+          // Todo: implentar permissão pra um marcador de um psf poder marcar
+          // para pessoa de outro psf
+
+
+          const cota = await CotaItem.findOne({
+            where: {
+              cotas_id: competencia.id,
+              scad_estabelecimento_id: psfId,
+              codprocedimento: procedimentoId,
+              total: { [Op.gte]: 0 }
+            }
+          })
+
+          const cotaGrupo = await connection.query(`
+            SELECT 
+              ci.total, 
+              gpp.grupo_id, 
+              ci.id 
+            FROM cota_itens ci
+              INNER JOIN grupo_procedimentos_procedimento gpp ON gpp.grupo_id = ci.codprocedimento
+            WHERE ci.total > 0 
+            and gpp.procedimento_id = '${procedimentoId}' 
+            and scad_estabelecimento_id = '${psfId}' 
+            and cotas_id = '${competencia.id}'`, { 
+              type: Sequelize.QueryTypes.SELECT,
+              raw: true 
+            })
 
           console.log('procedimento', procedimento)
         })
